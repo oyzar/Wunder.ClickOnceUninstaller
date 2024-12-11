@@ -1,14 +1,12 @@
-﻿using System;
-using System.Collections.Generic;
+﻿using Microsoft.Extensions.Logging;
 
-namespace Wunder.ClickOnceUninstaller
+namespace ClickOnceUninstaller;
+
+public interface IUninstallStep : IDisposable
 {
-    public interface IUninstallStep : IDisposable
-    {
-        void Prepare(List<string> componentsToRemove);
+    void Prepare(List<string> componentsToRemove);
 
-        void PrintDebugInformation();
+    void PrintDebugInformation(ILogger logger);
 
-        void Execute();
-    }
+    void Execute(ILogger logger);
 }

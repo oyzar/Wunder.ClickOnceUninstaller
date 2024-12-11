@@ -1,49 +1,47 @@
-﻿using System;
-using System.Collections.Generic;
+﻿using System.Runtime.Versioning;
+using Microsoft.Extensions.Logging;
 using Microsoft.Win32;
 
-namespace Wunder.ClickOnceUninstaller
+namespace ClickOnceUninstaller;
+
+[SupportedOSPlatform("windows")]
+public class RemoveUninstallEntry(UninstallInfo uninstallInfo) : IUninstallStep
 {
-    public class RemoveUninstallEntry : IUninstallStep
+    private RegistryKey _uninstall;
+
+    public void Prepare(List<string> componentsToRemove)
     {
-        private readonly UninstallInfo _uninstallInfo;
-        private RegistryKey _uninstall;
+        _uninstall = Registry.CurrentUser.OpenSubKey(UninstallInfo.UninstallRegistryPath, true);
+    }
 
-        public RemoveUninstallEntry(UninstallInfo uninstallInfo)
+    public void PrintDebugInformation(
+        ILogger logger
+    )
+    {
+        if (_uninstall == null)
         {
-            _uninstallInfo = uninstallInfo;
+            throw new InvalidOperationException("Call Prepare() first.");
         }
 
-        public void Prepare(List<string> componentsToRemove)
+        logger.LogDebug("Remove uninstall info from {Key}", uninstallInfo.Key);
+    }
+
+    public void Execute(ILogger logger)
+    {
+        if (_uninstall == null)
         {
-            _uninstall = Registry.CurrentUser.OpenSubKey(UninstallInfo.UninstallRegistryPath, true);
+            throw new InvalidOperationException("Call Prepare() first.");
         }
 
-        public void PrintDebugInformation()
+        _uninstall.DeleteSubKey(uninstallInfo.Key);
+    }
+
+    public void Dispose()
+    {
+        if (_uninstall != null)
         {
-            if (_uninstall == null)
-                throw new InvalidOperationException("Call Prepare() first.");
-
-            Console.WriteLine("Remove uninstall info from " + _uninstall.OpenSubKey(_uninstallInfo.Key).Name);
-
-            Console.WriteLine();
-        }
-
-        public void Execute()
-        {
-            if (_uninstall == null)
-                throw new InvalidOperationException("Call Prepare() first.");
-
-            _uninstall.DeleteSubKey(_uninstallInfo.Key);
-        }
-
-        public void Dispose()
-        {
-            if (_uninstall != null)
-            {
-                _uninstall.Close();
-                _uninstall = null;
-            }
+            _uninstall.Close();
+            _uninstall = null;
         }
     }
 }

@@ -1,21 +1,22 @@
-﻿using System;
-using System.Collections.Generic;
-using System.IO;
+﻿using Microsoft.Extensions.Logging;
 
-namespace Wunder.ClickOnceUninstaller
+namespace ClickOnceUninstaller;
+
+public class RemoveFiles : IUninstallStep
 {
-    public class RemoveFiles : IUninstallStep
+    private List<string> _clickOnceFolders;
+    private List<string> _foldersToRemove;
+    private List<string> _filesToRemove;
+
+    public void Prepare(List<string> componentsToRemove)
     {
-        private string _clickOnceFolder;
-        private List<string> _foldersToRemove;
-        private List<string> _filesToRemove;
+        _clickOnceFolders = FindClickOnceFolders().ToList();
 
-        public void Prepare(List<string> componentsToRemove)
+        _foldersToRemove = [];
+        _filesToRemove = [];
+        foreach (var clickOnceFolder in _clickOnceFolders)
         {
-            _clickOnceFolder = FindClickOnceFolder();
-
-            _foldersToRemove = new List<string>();
-            foreach (var directory in Directory.GetDirectories(_clickOnceFolder))
+            foreach (var directory in Directory.GetDirectories(clickOnceFolder))
             {
                 if (componentsToRemove.Contains(Path.GetFileName(directory)))
                 {
@@ -23,82 +24,87 @@ namespace Wunder.ClickOnceUninstaller
                 }
             }
 
-            _filesToRemove = new List<string>();
-            foreach (var file in Directory.GetFiles(Path.Combine(_clickOnceFolder, "manifests")))
+            var manifests = Path.Combine(clickOnceFolder, "manifests");
+            if (Directory.Exists(manifests))
             {
-                if (componentsToRemove.Contains(Path.GetFileNameWithoutExtension(file)))
+                foreach (var file in Directory.GetFiles(manifests))
                 {
-                    _filesToRemove.Add(file);
-                }
-            }
-        }
-
-        public void PrintDebugInformation()
-        {
-            if (string.IsNullOrEmpty(_clickOnceFolder) || !Directory.Exists(_clickOnceFolder))
-                throw new InvalidOperationException("Call Prepare() first.");
-
-            Console.WriteLine("Remove files from " + _clickOnceFolder);
-
-            foreach (var folder in _foldersToRemove)
-            {
-                Console.WriteLine("Delete folder " + folder.Substring(_clickOnceFolder.Length + 1));
-            }
-
-            foreach (var file in _filesToRemove)
-            {
-                Console.WriteLine("Delete file " + file.Substring(_clickOnceFolder.Length + 1));
-            }
-
-            Console.WriteLine();
-        }
-
-        public void Execute()
-        {
-            if (string.IsNullOrEmpty(_clickOnceFolder) || !Directory.Exists(_clickOnceFolder))
-                throw new InvalidOperationException("Call Prepare() first.");
-
-            foreach (var folder in _foldersToRemove)
-            {
-                try
-                {
-                    Directory.Delete(folder, true);
-                }
-                catch (UnauthorizedAccessException)
-                {
-                }
-            }
-
-            foreach (var file in _filesToRemove)
-            {
-                File.Delete(file);
-            }
-        }
-
-        private string FindClickOnceFolder()
-        {
-            var apps20Folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Apps\2.0");
-            if (!Directory.Exists(apps20Folder)) throw new ArgumentException("Could not find ClickOnce folder");
-
-            foreach (var subFolder in Directory.GetDirectories(apps20Folder))
-            {
-                if ((Path.GetFileName(subFolder) ?? string.Empty).Length == 12)
-                {
-                    foreach (var subSubFolder in Directory.GetDirectories(subFolder))
+                    if (componentsToRemove.Contains(Path.GetFileNameWithoutExtension(file)))
                     {
-                        if ((Path.GetFileName(subSubFolder) ?? string.Empty).Length == 12)
-                        {
-                            return subSubFolder;
-                        }
+                        _filesToRemove.Add(file);
                     }
                 }
             }
+        }
+    }
 
+    public void PrintDebugInformation(
+        ILogger logger
+    )
+    {
+        foreach (var folder in _foldersToRemove)
+        {
+            logger.LogDebug("Delete folder {Folder}", folder);
+        }
+
+        foreach (var file in _filesToRemove)
+        {
+            logger.LogDebug("Delete file {File}", file);
+        }
+    }
+
+    public void Execute(ILogger logger)
+    {
+        foreach (var file in _filesToRemove)
+        {
+            try
+            {
+                RetryHelpers.WithRetries(() => File.Delete(file), logger);
+            }
+            catch (Exception e)
+            {
+                logger.LogWarning(e, "Unable to delete file {File}", file);
+            }
+        }
+
+        foreach (var folder in _foldersToRemove)
+        {
+            try
+            {
+                RetryHelpers.WithRetries(() => Directory.Delete(folder, true), logger);
+            }
+            catch (Exception e)
+            {
+                logger.LogWarning(e, "Unable to delete folder {Folder}", folder);
+            }
+        }
+    }
+
+    private static IEnumerable<string> FindClickOnceFolders()
+    {
+        var apps20Folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Apps\2.0");
+        if (!Directory.Exists(apps20Folder))
+        {
             throw new ArgumentException("Could not find ClickOnce folder");
         }
 
-        public void Dispose()
+        foreach (var subFolder in Directory.GetDirectories(apps20Folder))
         {
+            //clickonce creates random folders that are 12 characters long with another folder inside that is also randomly 12 characters long
+            if (Path.GetFileName(subFolder).Length == 12)
+            {
+                foreach (var subSubFolder in Directory.GetDirectories(subFolder))
+                {
+                    if (Path.GetFileName(subSubFolder).Length == 12)
+                    {
+                        yield return subSubFolder;
+                    }
+                }
+            }
         }
+    }
+
+    public void Dispose()
+    {
     }
 }
